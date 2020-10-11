@@ -115,7 +115,11 @@ ngx_module_t  ngx_http_module = {
     NGX_MODULE_V1_PADDING
 };
 
-
+/**
+ *ngx_http_commands 命令集的回调函数
+ *HTTP模块初始化的入口函数
+ *
+ */
 static char *
 ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -134,6 +138,7 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     /* the main http context */
 
+    /* 分配一块内存，存放http配置上下文 */
     ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_conf_ctx_t));
     if (ctx == NULL) {
         return NGX_CONF_ERROR;
@@ -144,11 +149,19 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     /* count the number of the http modules and set up their indices */
 
+    /* 计算http模块个数 */
     ngx_http_max_module = ngx_count_modules(cf->cycle, NGX_HTTP_MODULE);
 
 
     /* the http main_conf context, it is the same in the all http contexts */
 
+    /**
+    * 最外层的HTTP配置
+    * http
+     {
+     include       mime.types;
+     default_type  application/octet-stream;
+    */
     ctx->main_conf = ngx_pcalloc(cf->pool,
                                  sizeof(void *) * ngx_http_max_module);
     if (ctx->main_conf == NULL) {
@@ -160,7 +173,15 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * the http null srv_conf context, it is used to merge
      * the server{}s' srv_conf's
      */
-
+    /**
+        * server层的配置
+        *   server
+     {
+       listen       80;
+       #server_name  blog.s135.com;
+       index index.html index.htm index.php;
+       root   /home/wwwroot/;
+        */
     ctx->srv_conf = ngx_pcalloc(cf->pool, sizeof(void *) * ngx_http_max_module);
     if (ctx->srv_conf == NULL) {
         return NGX_CONF_ERROR;
@@ -171,7 +192,16 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * the http null loc_conf context, it is used to merge
      * the server{}s' loc_conf's
      */
-
+    /**
+        * location 层的配置
+       location ~ .*\.(php|php5)?$
+       {
+         #fastcgi_pass  unix:/tmp/php-cgi.sock;
+         fastcgi_pass  127.0.0.1:9000;
+         fastcgi_index index.php;
+         include fcgi.conf;
+       }
+        */
     ctx->loc_conf = ngx_pcalloc(cf->pool, sizeof(void *) * ngx_http_max_module);
     if (ctx->loc_conf == NULL) {
         return NGX_CONF_ERROR;
@@ -182,7 +212,10 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * create the main_conf's, the null srv_conf's, and the null loc_conf's
      * of the all http modules
      */
-
+/**
+      * 调用：create_main_conf、create_srv_conf、create_loc_conf
+      * 创建配置
+      */
     for (m = 0; cf->cycle->modules[m]; m++) {
         if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE) {
             continue;
@@ -216,21 +249,24 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     pcf = *cf;
     cf->ctx = ctx;
 
-    for (m = 0; cf->cycle->modules[m]; m++) {
-        if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE) {
-            continue;
-        }
+    /**
+    * preconfiguration 预先初始化配置信息
+    */
+   for (m = 0; cf->cycle->modules[m]; m++) {
+       if (cf->cycle->modules[m]->type != NGX_HTTP_MODULE) {
+           continue;
+       }
 
-        module = cf->cycle->modules[m]->ctx;
+       module = cf->cycle->modules[m]->ctx;
 
-        if (module->preconfiguration) {
-            if (module->preconfiguration(cf) != NGX_OK) {
-                return NGX_CONF_ERROR;
-            }
-        }
-    }
+       if (module->preconfiguration) {
+           if (module->preconfiguration(cf) != NGX_OK) {
+               return NGX_CONF_ERROR;
+           }
+       }
+   }
 
-    /* parse inside the http{} block */
+   /* parse inside the http{} block */
 
     cf->module_type = NGX_HTTP_MODULE;
     cf->cmd_type = NGX_HTTP_MAIN_CONF;
@@ -245,6 +281,11 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * and its location{}s' loc_conf's
      */
 
+    /**
+     * 初始化main配置
+     * 合并 server srv_conf
+     * 合并location loc_conf
+     */
     cmcf = ctx->main_conf[ngx_http_core_module.ctx_index];
     cscfp = cmcf->servers.elts;
 
@@ -273,7 +314,9 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
     /* create location trees */
-
+/**
+     * 创建 location模块的trees
+     */
     for (s = 0; s < cmcf->servers.nelts; s++) {
 
         clcf = cscfp[s]->ctx->loc_conf[ngx_http_core_module.ctx_index];
@@ -329,7 +372,7 @@ ngx_http_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
     /* optimize the lists of ports, addresses and server names */
-
+/* ngx_http_optimize_servers 初始化listen 端口号 ip地址 服务器等监听信息*/
     if (ngx_http_optimize_servers(cf, cmcf, cmcf->ports) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
@@ -1374,6 +1417,11 @@ ngx_http_add_server(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
 }
 
 
+/**
+ * ngx_http_optimize_servers：处理Nginx服务的监听套接字
+ * 说明：主要遍历Nginx服务器提供的端口，然后根据每一个IP地址:port这种配置创建一个监听套接字
+ * ngx_http_init_listening：初始化监听套接字
+ */
 static ngx_int_t
 ngx_http_optimize_servers(ngx_conf_t *cf, ngx_http_core_main_conf_t *cmcf,
     ngx_array_t *ports)
@@ -1386,6 +1434,7 @@ ngx_http_optimize_servers(ngx_conf_t *cf, ngx_http_core_main_conf_t *cmcf,
         return NGX_OK;
     }
 
+    /* 根据Nginx配置的端口号进行遍历 */
     port = ports->elts;
     for (p = 0; p < ports->nelts; p++) {
 
@@ -1412,6 +1461,7 @@ ngx_http_optimize_servers(ngx_conf_t *cf, ngx_http_core_main_conf_t *cmcf,
             }
         }
 
+        /* 初始化监听套接字 */
         if (ngx_http_init_listening(cf, &port[p]) != NGX_OK) {
             return NGX_ERROR;
         }
@@ -1623,6 +1673,9 @@ ngx_http_cmp_dns_wildcards(const void *one, const void *two)
 }
 
 
+/**
+ * 初始化侦听套接字
+ */
 static ngx_int_t
 ngx_http_init_listening(ngx_conf_t *cf, ngx_http_conf_port_t *port)
 {
@@ -1651,6 +1704,7 @@ ngx_http_init_listening(ngx_conf_t *cf, ngx_http_conf_port_t *port)
 
     i = 0;
 
+    /* 根据IP地址 遍历 创建 listening*/
     while (i < last) {
 
         if (bind_wildcard && !addr[i].opt.bind) {
@@ -1658,6 +1712,7 @@ ngx_http_init_listening(ngx_conf_t *cf, ngx_http_conf_port_t *port)
             continue;
         }
 
+        /* 创建侦听套接字 listening */
         ls = ngx_http_add_listening(cf, &addr[i]);
         if (ls == NULL) {
             return NGX_ERROR;
@@ -1696,6 +1751,9 @@ ngx_http_init_listening(ngx_conf_t *cf, ngx_http_conf_port_t *port)
 }
 
 
+/**
+ * 创建侦听套接字 listening
+ */
 static ngx_listening_t *
 ngx_http_add_listening(ngx_conf_t *cf, ngx_http_conf_addr_t *addr)
 {
@@ -1703,6 +1761,7 @@ ngx_http_add_listening(ngx_conf_t *cf, ngx_http_conf_addr_t *addr)
     ngx_http_core_loc_conf_t  *clcf;
     ngx_http_core_srv_conf_t  *cscf;
 
+    /* 创建一个套接字 */
     ls = ngx_create_listening(cf, addr->opt.sockaddr, addr->opt.socklen);
     if (ls == NULL) {
         return NULL;
@@ -1710,6 +1769,8 @@ ngx_http_add_listening(ngx_conf_t *cf, ngx_http_conf_addr_t *addr)
 
     ls->addr_ntop = 1;
 
+    /* 侦听套接字 的回调函数。该回调函数在ngx_event_accept函数中回调；
+     * 回调之后，会将读取事件回调函数rev->handler()修改成方法：ngx_http_wait_request_handler*/
     ls->handler = ngx_http_init_connection;
 
     cscf = addr->default_server;
